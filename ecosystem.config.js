@@ -19,7 +19,11 @@ module.exports = {
       // Environment
       env: {
         NODE_ENV: "production",
-	NODE_PORT: 20112
+        PORT: 20112,
+        // WAHA (WhatsApp HTTP API) Configuration
+        WAHA_BASE_URL: "http://41.216.186.50:30401",
+        WAHA_API_KEY: "318d6cd072944f0baaec16741e8b2b44",
+        WAHA_SESSION: "default"
       },
 
       // Logging

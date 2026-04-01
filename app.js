@@ -6,6 +6,11 @@ const path = require('path');
 
 const app = express();
 
+// ─── Configuration ─────────────────────────────────────────────────────────────
+const WAHA_BASE_URL = process.env.WAHA_BASE_URL || 'http://41.216.186.50:30401';
+const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
+const WAHA_SESSION = process.env.WAHA_SESSION || 'default';
+
 // ─── Database Setup ───────────────────────────────────────────────────────────
 const db = new Database(path.join(__dirname, 'logs.db'));
 
@@ -70,16 +75,22 @@ app.post('/api/sendMessage', async (req, res) => {
     }
 
     try {
+        // Format phone number for WAHA (ensure it has @c.us suffix)
+        const formattedPhone = String(phone).replace(/[^0-9]/g, '');
+        const chatId = formattedPhone.endsWith('@c.us') ? formattedPhone : `${formattedPhone}@c.us`;
+
         const response = await axios.post(
-            'http://41.216.186.50:20111/api/sendMessage',
-            { apiKey, phone, message },
+            `${WAHA_BASE_URL}/api/sendText`,
             {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                transformRequest: [(data) => {
-                    return Object.keys(data)
-                        .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
-                        .join('&');
-                }]
+                chatId: chatId,
+                text: message,
+                session: WAHA_SESSION
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey
+                }
             }
         );
 
@@ -91,10 +102,10 @@ app.post('/api/sendMessage', async (req, res) => {
             saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: error.response.status, response: error.response.data });
             res.status(error.response.status).json({ error: error.response.data });
         } else if (error.request) {
-            saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: 500, response: { error: 'No response received from the external API' } });
-            res.status(500).json({ error: 'No response received from the external API' });
+            saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: 500, response: { error: 'No response received from the WhatsApp API' } });
+            res.status(500).json({ error: 'No response received from the WhatsApp API' });
         } else {
-            saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: 500, response: { error: 'Error setting up the request' } });
+            saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: 500, response: { error: error.message } });
             res.status(500).json({ error: 'Error setting up the request' });
         }
     }
@@ -143,16 +154,22 @@ app.post('/api/sendBroadcast', async (req, res) => {
         const message = replacePlaceholders(template, templateData);
 
         try {
+            // Format phone number for WAHA (ensure it has @c.us suffix)
+            const formattedPhone = String(to).replace(/[^0-9]/g, '');
+            const chatId = formattedPhone.endsWith('@c.us') ? formattedPhone : `${formattedPhone}@c.us`;
+
             const response = await axios.post(
-                'http://41.216.186.50:20111/api/sendMessage',
-                { apiKey, phone: to, message },
+                `${WAHA_BASE_URL}/api/sendText`,
                 {
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    transformRequest: [(data) => {
-                        return Object.keys(data)
-                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
-                            .join('&');
-                    }]
+                    chatId: chatId,
+                    text: message,
+                    session: WAHA_SESSION
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey
+                    }
                 }
             );
 
@@ -162,8 +179,9 @@ app.post('/api/sendBroadcast', async (req, res) => {
 
         } catch (error) {
             failures++;
-            failureDetails.push({ to, error: error.message });
-            saveLog({ endpoint: '/api/sendBroadcast', phone: to, message, status_code: 500, response: { error: error.message } });
+            const errorMessage = error.response?.data?.error || error.message || 'Unknown error';
+            failureDetails.push({ to, error: errorMessage });
+            saveLog({ endpoint: '/api/sendBroadcast', phone: to, message, status_code: error.response?.status || 500, response: { error: errorMessage } });
         }
     }
 
