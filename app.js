@@ -67,11 +67,18 @@ const swaggerOptions = {
 
 const swaggerSpecs = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+app.get('/api-docs', swaggerUi.setup(swaggerSpecs));
+app.get('/api-docs/*', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cors());
+
+// ─── Health Check ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.send('WhatsApp API running');
+});
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 function replacePlaceholders(template, data) {
