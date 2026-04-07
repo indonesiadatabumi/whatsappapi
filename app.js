@@ -3,6 +3,8 @@ const axios = require('axios');
 const cors = require('cors');
 const Database = require('better-sqlite3');
 const path = require('path');
+const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
 
 const app = express();
 
@@ -45,6 +47,27 @@ function saveLog({ endpoint, phone, message, status_code, response }) {
     }
 }
 
+// ─── Swagger Setup ───────────────────────────────────────────────────────────
+const swaggerOptions = {
+    definition: {
+        openapi: '3.0.0',
+        info: {
+            title: 'WhatsApp API',
+            version: '1.0.0',
+            description: 'API for sending WhatsApp messages via WAHA',
+        },
+        servers: [
+            {
+                url: `http://localhost:${process.env.PORT || 20112}`,
+            },
+        ],
+    },
+    apis: ['./app.js'],
+};
+
+const swaggerSpecs = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -57,7 +80,54 @@ function replacePlaceholders(template, data) {
     });
 }
 
+function normalizePhone(phone) {
+    let cleaned = phone.replace(/[^0-9]/g, '');
+    if (cleaned.startsWith('62')) {
+        return cleaned;
+    } else if (cleaned.startsWith('0')) {
+        return '62' + cleaned.slice(1);
+    } else if (cleaned.startsWith('8')) {
+        return '62' + cleaned;
+    } else {
+        // Assume it's a local number without prefix, add 62
+        return '62' + cleaned;
+    }
+}
+
 // ─── POST /api/sendMessage ────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/sendMessage:
+ *   post:
+ *     summary: Send a WhatsApp message
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - apiKey
+ *               - phone
+ *               - message
+ *             properties:
+ *               apiKey:
+ *                 type: string
+ *                 description: API key for authentication
+ *               phone:
+ *                 type: string
+ *                 description: Phone number (will be normalized to include country code)
+ *               message:
+ *                 type: string
+ *                 description: Message text to send
+ *     responses:
+ *       200:
+ *         description: Message sent successfully
+ *       400:
+ *         description: Invalid request parameters
+ *       500:
+ *         description: Server error
+ */
 app.post('/api/sendMessage', async (req, res) => {
     const { apiKey, phone, message } = req.body;
 
@@ -75,9 +145,9 @@ app.post('/api/sendMessage', async (req, res) => {
     }
 
     try {
-        // Format phone number for WAHA (ensure it has @c.us suffix)
-        const formattedPhone = String(phone).replace(/[^0-9]/g, '');
-        const chatId = formattedPhone.endsWith('@c.us') ? formattedPhone : `${formattedPhone}@c.us`;
+        // Normalize and format phone number for WAHA
+        const normalizedPhone = normalizePhone(String(phone));
+        const chatId = `${normalizedPhone}@c.us`;
 
         const response = await axios.post(
             `${WAHA_BASE_URL}/api/sendText`,
@@ -112,6 +182,49 @@ app.post('/api/sendMessage', async (req, res) => {
 });
 
 // ─── POST /api/sendBroadcast ──────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/sendBroadcast:
+ *   post:
+ *     summary: Send broadcast messages to multiple recipients
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - apiKey
+ *               - data
+ *             properties:
+ *               apiKey:
+ *                 type: string
+ *                 description: API key for authentication
+ *               data:
+ *                 type: array
+ *                 description: Array of message data
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - to
+ *                     - template
+ *                     - data
+ *                   properties:
+ *                     to:
+ *                       type: string
+ *                       description: Phone number (will be normalized)
+ *                     template:
+ *                       type: string
+ *                       description: Message template with placeholders
+ *                     data:
+ *                       type: object
+ *                       description: Data to replace placeholders in template
+ *     responses:
+ *       200:
+ *         description: Broadcast completed
+ *       400:
+ *         description: Invalid request parameters
+ */
 app.post('/api/sendBroadcast', async (req, res) => {
     const { apiKey, data } = req.body;
 
@@ -154,9 +267,9 @@ app.post('/api/sendBroadcast', async (req, res) => {
         const message = replacePlaceholders(template, templateData);
 
         try {
-            // Format phone number for WAHA (ensure it has @c.us suffix)
-            const formattedPhone = String(to).replace(/[^0-9]/g, '');
-            const chatId = formattedPhone.endsWith('@c.us') ? formattedPhone : `${formattedPhone}@c.us`;
+            // Normalize and format phone number for WAHA
+            const normalizedPhone = normalizePhone(String(to));
+            const chatId = `${normalizedPhone}@c.us`;
 
             const response = await axios.post(
                 `${WAHA_BASE_URL}/api/sendText`,
@@ -172,7 +285,6 @@ app.post('/api/sendBroadcast', async (req, res) => {
                     }
                 }
             );
-
             successes++;
             successfulDetails.push({ to, message, response: response.data });
             saveLog({ endpoint: '/api/sendBroadcast', phone: to, message, status_code: response.status, response: response.data });
@@ -191,6 +303,40 @@ app.post('/api/sendBroadcast', async (req, res) => {
 });
 
 // ─── GET /api/logs ────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/logs:
+ *   get:
+ *     summary: Get API logs
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Number of logs to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Offset for pagination
+ *       - in: query
+ *         name: endpoint
+ *         schema:
+ *           type: string
+ *         description: Filter by endpoint
+ *       - in: query
+ *         name: phone
+ *         schema:
+ *           type: string
+ *         description: Filter by phone number
+ *     responses:
+ *       200:
+ *         description: Logs retrieved successfully
+ *       500:
+ *         description: Server error
+ */
 app.get('/api/logs', (req, res) => {
     try {
         const { limit = 100, offset = 0, endpoint, phone } = req.query;
