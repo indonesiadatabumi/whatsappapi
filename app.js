@@ -67,8 +67,6 @@ const swaggerOptions = {
 
 const swaggerSpecs = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
-app.get('/api-docs', swaggerUi.setup(swaggerSpecs));
-app.get('/api-docs/*', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.urlencoded({ extended: true }));
