@@ -166,7 +166,7 @@ app.post('/api/sendMessage', async (req, res) => {
             {
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': apiKey
+                    'X-Api-Key': apiKey
                 }
             }
         );
@@ -288,7 +288,7 @@ app.post('/api/sendBroadcast', async (req, res) => {
                 {
                     headers: {
                         'Content-Type': 'application/json',
-                        'x-api-key': apiKey
+                        'X-Api-Key': apiKey
                     }
                 }
             );
