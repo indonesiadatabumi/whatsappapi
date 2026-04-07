@@ -166,7 +166,7 @@ app.post('/api/sendMessage', async (req, res) => {
             {
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Api-Key': 'b934020c9a7a4ee49fadc603d548f955'
+                    'x-api-key': apiKey
                 }
             }
         );
@@ -288,7 +288,7 @@ app.post('/api/sendBroadcast', async (req, res) => {
                 {
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Api-Key': 'b934020c9a7a4ee49fadc603d548f955'
+                        'x-api-key': apiKey
                     }
                 }
             );
