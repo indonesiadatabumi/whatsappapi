@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "whatsapppi",
+      name: "whatsapppi-waha",
       script: "app.js",
 
       // Node settings
@@ -19,7 +19,7 @@ module.exports = {
       // Environment
       env: {
         NODE_ENV: "production",
-        PORT: 20112,
+        PORT: 20115,
         // WAHA (WhatsApp HTTP API) Configuration
         WAHA_BASE_URL: "http://41.216.186.50:30401",
         WAHA_API_KEY: "318d6cd072944f0baaec16741e8b2b44",
