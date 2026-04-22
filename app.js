@@ -210,6 +210,10 @@ function normalizePhone(phone) {
     }
 }
 
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ─── POST /api/sendMessage ────────────────────────────────────────────────────
 /**
  * @swagger
@@ -288,6 +292,16 @@ app.post('/api/sendMessage', async (req, res) => {
         const normalizedPhone = normalizePhone(String(phone));
         const chatId = `${normalizedPhone}@c.us`;
 
+        // Start typing simulation
+        try {
+            await axios.post(`${WAHA_BASE_URL}/api/startTyping`, { chatId, session: WAHA_SESSION }, { headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey } });
+        } catch (typingError) {
+            console.log('Start typing failed:', typingError.message);
+        }
+
+        const typingDelay = Math.min(message.length * 100, 3000);
+        await delay(typingDelay);
+
         const response = await axios.post(
             `${WAHA_BASE_URL}/api/sendText`,
             {
@@ -302,6 +316,13 @@ app.post('/api/sendMessage', async (req, res) => {
                 }
             }
         );
+
+        // Stop typing
+        try {
+            await axios.post(`${WAHA_BASE_URL}/api/stopTyping`, { chatId, session: WAHA_SESSION }, { headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey } });
+        } catch (typingError) {
+            console.log('Stop typing failed:', typingError.message);
+        }
 
         saveLog({ endpoint: '/api/sendMessage', phone, message, status_code: response.status, response: response.data });
         res.status(response.status).json(response.data);
@@ -438,6 +459,16 @@ app.post('/api/sendBroadcast', async (req, res) => {
             const normalizedPhone = normalizePhone(String(to));
             const chatId = `${normalizedPhone}@c.us`;
 
+            // Start typing simulation
+            try {
+                await axios.post(`${WAHA_BASE_URL}/api/startTyping`, { chatId, session: WAHA_SESSION }, { headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey } });
+            } catch (typingError) {
+                console.log('Start typing failed:', typingError.message);
+            }
+
+            const typingDelay = Math.min(message.length * 100, 3000);
+            await delay(typingDelay);
+
             const response = await axios.post(
                 `${WAHA_BASE_URL}/api/sendText`,
                 {
@@ -452,9 +483,20 @@ app.post('/api/sendBroadcast', async (req, res) => {
                     }
                 }
             );
+
+            // Stop typing
+            try {
+                await axios.post(`${WAHA_BASE_URL}/api/stopTyping`, { chatId, session: WAHA_SESSION }, { headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey } });
+            } catch (typingError) {
+                console.log('Stop typing failed:', typingError.message);
+            }
+
             successes++;
             successfulDetails.push({ to, message, response: response.data });
             saveLog({ endpoint: '/api/sendBroadcast', phone: to, message, status_code: response.status, response: response.data });
+
+            // Delay between broadcasts to avoid suspension
+            await delay(2000);
 
         } catch (error) {
             failures++;
