@@ -15,10 +15,11 @@ This is a comprehensive WhatsApp HTTP API server built with Express.js and WAHA 
 1. [Authentication](#authentication)
 2. [System Endpoints](#system-endpoints)
 3. [Message Endpoints](#message-endpoints)
-4. [Broadcast Endpoints](#broadcast-endpoints)
-5. [Monitoring Endpoints](#monitoring-endpoints)
-6. [Error Handling](#error-handling)
-7. [Examples](#examples)
+4. [Contact Endpoints](#contact-endpoints)
+5. [Broadcast Endpoints](#broadcast-endpoints)
+6. [Monitoring Endpoints](#monitoring-endpoints)
+7. [Error Handling](#error-handling)
+8. [Examples](#examples)
 
 ---
 
@@ -276,13 +277,101 @@ console.log(data);
 
 ---
 
+## Contact Endpoints
+
+### 1. Check Contact
+
+**Endpoint:** `GET /api/checkContact`
+
+**Description:** Check if a phone number exists as a WhatsApp contact.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| apiKey | string | - | API key for authentication (required) |
+| phone | string | - | Phone number to check (required) |
+| session | string | default | WhatsApp session name |
+
+**Response (Contact Exists):**
+```json
+{
+  "exists": true,
+  "phone": "628123456789",
+  "chatId": "628123456789@c.us",
+  "data": {
+    "id": "628123456789@c.us",
+    "name": "John Doe",
+    "pushname": "John"
+  }
+}
+```
+
+**Response (Contact Not Found):**
+```json
+{
+  "exists": false,
+  "phone": "628123456789",
+  "chatId": "628123456789@c.us"
+}
+```
+
+**Example (cURL):**
+```bash
+curl "http://localhost:20115/api/checkContact?apiKey=your-api-key&phone=08123456789"
+```
+
+---
+
+### 2. Get All Contacts
+
+**Endpoint:** `GET /api/contacts`
+
+**Description:** Retrieve all WhatsApp contacts from the WAHA API.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| apiKey | string | - | API key for authentication (required) |
+| session | string | default | WhatsApp session name |
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "count": 5,
+  "data": [
+    {
+      "id": "628123456789@c.us",
+      "name": "John Doe",
+      "pushname": "John",
+      "isBusiness": false
+    }
+  ]
+}
+```
+
+**Example (cURL):**
+```bash
+curl "http://localhost:20115/api/contacts?apiKey=your-api-key"
+```
+
+---
+
 ## Broadcast Endpoints
 
 ### Send Broadcast Messages
 
 **Endpoint:** `POST /api/sendBroadcast`
 
-**Description:** Send personalized messages to multiple recipients using templates with variable substitution.
+**Description:** Send personalized messages to multiple recipients using templates with variable substitution. Includes anti-suspension features: random delays (1-5 seconds), typing simulation, and rate limiting (50 broadcasts per hour).
+
+**Rate Limiting:** Maximum 50 broadcast requests per hour to prevent account suspension.
+
+**Anti-Suspension Features:**
+- Random delays between messages (1-5 seconds)
+- Typing start/stop simulation
+- Message signatures
+- Rate limiting per hour
 
 **Request Body:**
 ```json

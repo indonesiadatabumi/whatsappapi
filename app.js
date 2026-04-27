@@ -25,6 +25,13 @@ db.exec(`
         message     TEXT,
         status_code INTEGER,
         response    TEXT
+    );
+    CREATE TABLE IF NOT EXISTS rate_limits (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        endpoint    TEXT NOT NULL,
+        hour        INTEGER NOT NULL,
+        count       INTEGER DEFAULT 0,
+        UNIQUE(endpoint, hour)
     )
 `);
 
@@ -32,6 +39,28 @@ const insertLog = db.prepare(`
     INSERT INTO api_logs (endpoint, phone, message, status_code, response)
     VALUES (@endpoint, @phone, @message, @status_code, @response)
 `);
+
+const getRateLimit = db.prepare(`
+    SELECT count FROM rate_limits WHERE endpoint = ? AND hour = ?
+`);
+
+const upsertRateLimit = db.prepare(`
+    INSERT OR REPLACE INTO rate_limits (endpoint, hour, count)
+    VALUES (?, ?, COALESCE((SELECT count FROM rate_limits WHERE endpoint = ? AND hour = ?), 0) + 1)
+`);
+
+function checkRateLimit(endpoint, maxPerHour = 50) {
+    const now = new Date();
+    const hour = Math.floor(now.getTime() / (1000 * 60 * 60));
+    const current = getRateLimit.get(endpoint, hour);
+    return (current?.count || 0) < maxPerHour;
+}
+
+function incrementRateLimit(endpoint) {
+    const now = new Date();
+    const hour = Math.floor(now.getTime() / (1000 * 60 * 60));
+    upsertRateLimit.run(endpoint, hour, endpoint, hour);
+}
 
 function saveLog({ endpoint, phone, message, status_code, response }) {
     try {
@@ -425,6 +454,12 @@ app.post('/api/sendBroadcast', async (req, res) => {
         return res.status(400).json({ error: 'Invalid or missing data array' });
     }
 
+    // Check rate limit (50 messages per hour)
+    if (!checkRateLimit('/api/sendBroadcast', 50)) {
+        saveLog({ endpoint: '/api/sendBroadcast', status_code: 429, response: { error: 'Rate limit exceeded. Maximum 50 broadcasts per hour.' } });
+        return res.status(429).json({ error: 'Rate limit exceeded. Maximum 50 broadcasts per hour.' });
+    }
+
     let successes = 0;
     let failures = 0;
     const failureDetails = [];
@@ -495,8 +530,9 @@ app.post('/api/sendBroadcast', async (req, res) => {
             successfulDetails.push({ to, message, response: response.data });
             saveLog({ endpoint: '/api/sendBroadcast', phone: to, message, status_code: response.status, response: response.data });
 
-            // Delay between broadcasts to avoid suspension
-            await delay(2000);
+            // Delay between broadcasts to avoid suspension (random 1-5 seconds)
+            const randomDelay = Math.floor(Math.random() * 4000) + 1000; // 1000-5000ms
+            await delay(randomDelay);
 
         } catch (error) {
             failures++;
@@ -506,9 +542,205 @@ app.post('/api/sendBroadcast', async (req, res) => {
         }
     }
 
+    // Increment rate limit counter
+    incrementRateLimit('/api/sendBroadcast');
+
     const broadcastResult = { successes, failures, failureDetails, successfulDetails };
     saveLog({ endpoint: '/api/sendBroadcast', status_code: 200, response: { successes, failures } });
     res.status(200).json(broadcastResult);
+});
+
+// ─── GET /api/checkContact ───────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/checkContact:
+ *   get:
+ *     summary: Check if a phone number is a WhatsApp contact
+ *     description: Check if a phone number exists as a contact in WhatsApp
+ *     parameters:
+ *       - in: query
+ *         name: apiKey
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key for authentication
+ *       - in: query
+ *         name: phone
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Phone number to check
+ *       - in: query
+ *         name: session
+ *         schema:
+ *           type: string
+ *           default: default
+ *         description: WhatsApp session name
+ *     responses:
+ *       200:
+ *         description: Contact check result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 exists:
+ *                   type: boolean
+ *                 phone:
+ *                   type: string
+ *                 chatId:
+ *                   type: string
+ *       400:
+ *         description: Invalid parameters
+ *       500:
+ *         description: Server or WAHA API error
+ */
+app.get('/api/checkContact', async (req, res) => {
+    const { apiKey, phone, session = WAHA_SESSION } = req.query;
+
+    if (!apiKey || typeof apiKey !== 'string') {
+        saveLog({ endpoint: '/api/checkContact', phone, status_code: 400, response: { error: 'Invalid or missing apiKey' } });
+        return res.status(400).json({ error: 'Invalid or missing apiKey' });
+    }
+    if (!phone || (typeof phone !== 'string' && typeof phone !== 'number')) {
+        saveLog({ endpoint: '/api/checkContact', phone, status_code: 400, response: { error: 'Invalid or missing phone' } });
+        return res.status(400).json({ error: 'Invalid or missing phone' });
+    }
+
+    try {
+        const normalizedPhone = normalizePhone(String(phone));
+        const chatId = `${normalizedPhone}@c.us`;
+
+        // Try to check if contact exists by attempting to get contact info
+        const response = await axios.get(
+            `${WAHA_BASE_URL}/api/contacts/${chatId}`,
+            {
+                params: {
+                    session: session,
+                },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Api-Key': apiKey,
+                },
+            }
+        );
+
+        saveLog({ endpoint: '/api/checkContact', phone, status_code: response.status, response: response.data });
+        res.status(response.status).json({
+            exists: true,
+            phone: normalizedPhone,
+            chatId: chatId,
+            data: response.data
+        });
+
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            // Contact not found
+            const normalizedPhone = normalizePhone(String(phone));
+            const chatId = `${normalizedPhone}@c.us`;
+            saveLog({ endpoint: '/api/checkContact', phone, status_code: 200, response: { exists: false } });
+            res.status(200).json({
+                exists: false,
+                phone: normalizedPhone,
+                chatId: chatId
+            });
+        } else if (error.response) {
+            const errorMsg = error.response.data?.error || error.response.statusText || 'Error from WAHA API';
+            saveLog({ endpoint: '/api/checkContact', phone, status_code: error.response.status, response: { error: errorMsg } });
+            res.status(error.response.status).json({ error: errorMsg });
+        } else if (error.request) {
+            saveLog({ endpoint: '/api/checkContact', phone, status_code: 500, response: { error: 'No response from WAHA API' } });
+            res.status(500).json({ error: 'No response received from the WhatsApp API' });
+        } else {
+            saveLog({ endpoint: '/api/checkContact', phone, status_code: 500, response: { error: error.message } });
+            res.status(500).json({ error: 'Error setting up the request' });
+        }
+    }
+});
+
+// ─── GET /api/contacts ───────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/contacts:
+ *   get:
+ *     summary: Get all WhatsApp contacts
+ *     description: Retrieve all contacts from WhatsApp via WAHA API
+ *     parameters:
+ *       - in: query
+ *         name: apiKey
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key for authentication
+ *       - in: query
+ *         name: session
+ *         schema:
+ *           type: string
+ *           default: default
+ *         description: WhatsApp session name
+ *     responses:
+ *       200:
+ *         description: Contacts retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 count:
+ *                   type: integer
+ *       400:
+ *         description: Invalid API key
+ *       500:
+ *         description: Server or WAHA API error
+ */
+app.get('/api/contacts', async (req, res) => {
+    const { apiKey, session = WAHA_SESSION } = req.query;
+
+    if (!apiKey || typeof apiKey !== 'string') {
+        saveLog({ endpoint: '/api/contacts', status_code: 400, response: { error: 'Invalid or missing apiKey' } });
+        return res.status(400).json({ error: 'Invalid or missing apiKey' });
+    }
+
+    try {
+        const response = await axios.get(
+            `${WAHA_BASE_URL}/api/contacts`,
+            {
+                params: {
+                    session: session,
+                },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Api-Key': apiKey,
+                },
+            }
+        );
+
+        saveLog({ endpoint: '/api/contacts', status_code: response.status, response: { count: response.data?.length || 0 } });
+        res.status(response.status).json({
+            success: true,
+            data: response.data || [],
+            count: response.data?.length || 0,
+        });
+
+    } catch (error) {
+        if (error.response) {
+            const errorMsg = error.response.data?.error || error.response.statusText || 'Error from WAHA API';
+            saveLog({ endpoint: '/api/contacts', status_code: error.response.status, response: { error: errorMsg } });
+            res.status(error.response.status).json({ error: errorMsg });
+        } else if (error.request) {
+            saveLog({ endpoint: '/api/contacts', status_code: 500, response: { error: 'No response from WAHA API' } });
+            res.status(500).json({ error: 'No response received from the WhatsApp API' });
+        } else {
+            saveLog({ endpoint: '/api/contacts', status_code: 500, response: { error: error.message } });
+            res.status(500).json({ error: 'Error setting up the request' });
+        }
+    }
 });
 
 // ─── GET /api/messages ────────────────────────────────────────────────────────
