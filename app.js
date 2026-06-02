@@ -858,6 +858,114 @@ app.get('/api/messages', async (req, res) => {
     }
 });
 
+// ─── GET /api/conversations ────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /api/conversations:
+ *   get:
+ *     summary: Get full message conversation for a chat
+ *     description: Retrieve the complete chat history for a specific WhatsApp conversation from WAHA.
+ *     parameters:
+ *       - in: query
+ *         name: apiKey
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: API key for authentication
+ *       - in: query
+ *         name: session
+ *         schema:
+ *           type: string
+ *           default: default
+ *         description: WhatsApp session name
+ *       - in: query
+ *         name: chatId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: WhatsApp chat ID (e.g. 6281276101562@c.us)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Maximum number of messages to retrieve
+ *     responses:
+ *       200:
+ *         description: Conversation retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 chatId:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 count:
+ *                   type: integer
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server or WAHA API error
+ */
+app.get('/api/conversations', async (req, res) => {
+    const { apiKey, session = WAHA_SESSION, limit = 100, chatId } = req.query;
+
+    if (!apiKey || typeof apiKey !== 'string') {
+        saveLog({ endpoint: '/api/conversations', status_code: 400, response: { error: 'Invalid or missing apiKey' } });
+        return res.status(400).json({ error: 'Invalid or missing apiKey' });
+    }
+
+    if (!chatId || typeof chatId !== 'string') {
+        saveLog({ endpoint: '/api/conversations', status_code: 400, response: { error: 'Invalid or missing chatId' } });
+        return res.status(400).json({ error: 'Invalid or missing chatId' });
+    }
+
+    try {
+        const response = await axios.get(
+            `${WAHA_BASE_URL}/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages`,
+            {
+                params: {
+                    limit: Number(limit) || 100,
+                },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Api-Key': apiKey,
+                },
+            }
+        );
+
+        const data = response.data || [];
+        const count = Array.isArray(data) ? data.length : 1;
+
+        saveLog({ endpoint: '/api/conversations', status_code: response.status, response: { count } });
+        res.status(response.status).json({
+            success: true,
+            chatId,
+            data,
+            count,
+            source: 'chat-messages',
+        });
+    } catch (error) {
+        if (error.response) {
+            const errorMsg = error.response.data?.error || error.response.statusText || 'Error from WAHA API';
+            saveLog({ endpoint: '/api/conversations', status_code: error.response.status, response: { error: errorMsg } });
+            res.status(error.response.status).json({ error: errorMsg });
+        } else if (error.request) {
+            saveLog({ endpoint: '/api/conversations', status_code: 500, response: { error: 'No response from WAHA API' } });
+            res.status(500).json({ error: 'No response received from the WhatsApp API' });
+        } else {
+            saveLog({ endpoint: '/api/conversations', status_code: 500, response: { error: error.message } });
+            res.status(500).json({ error: 'Error setting up the request' });
+        }
+    }
+});
+
 // ─── POST /api/replyMessage ───────────────────────────────────────────────────
 /**
  * @swagger

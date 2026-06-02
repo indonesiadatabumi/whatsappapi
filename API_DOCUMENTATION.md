@@ -187,6 +187,48 @@ const data = await response.json();
 console.log(data);
 ```
 
+---
+
+### 3. Get Full Conversation Messages
+
+**Endpoint:** `GET /api/conversations`
+
+**Description:** Retrieve the full chat message history for a specific WhatsApp conversation by `chatId`.
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| apiKey | string | - | API key for authentication (required) |
+| session | string | default | WhatsApp session name |
+| chatId | string | - | WhatsApp chat ID (e.g. `6281276101562@c.us`) |
+| limit | integer | 100 | Maximum number of messages to retrieve |
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "chatId": "6281276101562@c.us",
+  "count": 50,
+  "data": [
+    {
+      "id": "message-id-1",
+      "chatId": "6281276101562@c.us",
+      "from": "6281276101562",
+      "to": "6287654321",
+      "text": "Hello!",
+      "timestamp": 1713607800
+    }
+  ]
+}
+```
+
+**Example (cURL):**
+```bash
+curl "http://localhost:20115/api/conversations?apiKey=your-api-key&chatId=6281276101562%40c.us&limit=100"
+```
+
+---
+
 **Example (Python):**
 ```python
 import requests
