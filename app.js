@@ -768,7 +768,17 @@ app.get('/api/contacts', async (req, res) => {
  *         schema:
  *           type: integer
  *           default: 100
- *         description: Maximum number of messages to retrieve
+ *         description: Maximum number of chats or messages to retrieve
+ *       - in: query
+ *         name: ids
+ *         schema:
+ *           type: string
+ *         description: Comma-separated chat IDs to fetch conversation overview for (e.g. 6281276101562@c.us)
+ *       - in: query
+ *         name: chatId
+ *         schema:
+ *           type: string
+ *         description: Alias for ids, fetch overview for a single chat
  *     responses:
  *       200:
  *         description: Messages retrieved successfully
@@ -782,17 +792,18 @@ app.get('/api/contacts', async (req, res) => {
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/Message'
+ *                     type: object
  *                 count:
  *                   type: integer
- *                   description: Total number of messages
+ *                   description: Total number of items returned
  *       400:
  *         description: Invalid API key
  *       500:
  *         description: Server or WAHA API error
  */
 app.get('/api/messages', async (req, res) => {
-    const { apiKey, session = WAHA_SESSION, limit = 100 } = req.query;
+    const { apiKey, session = WAHA_SESSION, limit = 100, ids, chatId } = req.query;
+    const targetIds = ids || chatId;
 
     if (!apiKey || typeof apiKey !== 'string') {
         saveLog({ endpoint: '/api/messages', status_code: 400, response: { error: 'Invalid or missing apiKey' } });
@@ -800,25 +811,36 @@ app.get('/api/messages', async (req, res) => {
     }
 
     try {
-        const response = await axios.get(
-            `${WAHA_BASE_URL}/api/messages`,
-            {
-                params: {
-                    session: session,
-                    limit: Number(limit) || 100,
-                },
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Api-Key': apiKey,
-                },
-            }
-        );
+        const targetUrl = targetIds
+            ? `${WAHA_BASE_URL}/api/${encodeURIComponent(session)}/chats/overview`
+            : `${WAHA_BASE_URL}/api/${encodeURIComponent(session)}/chats`;
 
-        saveLog({ endpoint: '/api/messages', status_code: response.status, response: { count: response.data?.length || 0 } });
+        const params = {
+            merge: true,
+        };
+
+        if (targetIds) {
+            params.limit = Number(limit) || 100;
+            params.ids = Array.isArray(targetIds) ? targetIds.join(',') : String(targetIds);
+        }
+
+        const response = await axios.get(targetUrl, {
+            params,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Api-Key': apiKey,
+            },
+        });
+
+        const data = response.data || [];
+        const count = Array.isArray(data) ? data.length : 1;
+
+        saveLog({ endpoint: '/api/messages', status_code: response.status, response: { count } });
         res.status(response.status).json({
             success: true,
-            data: response.data || [],
-            count: response.data?.length || 0,
+            data,
+            count,
+            source: targetIds ? 'chat-overview' : 'chat-list',
         });
 
     } catch (error) {
